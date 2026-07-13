@@ -19,7 +19,7 @@ No framework dependencies — only `ext-intl` is required.
 ## Installation
 
 ```bash
-composer require bahricanli/domainhunter-core
+composer require bahricanli/domainhunter
 ```
 
 ## License

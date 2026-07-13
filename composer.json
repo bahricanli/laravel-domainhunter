@@ -1,5 +1,5 @@
 {
-    "name": "bahricanli/domainhunter-core",
+    "name": "bahricanli/domainhunter",
     "description": "Framework-agnostic WHOIS lookup and domain-name parsing shared by domainhunter (Slim) and domainhunter-app (Laravel)",
     "type": "library",
     "version": "1.0.0",
