@@ -66,7 +66,7 @@ class WhoisService
         'pl'     => ['rdap' => 'https://rdap.dns.pl/domain/'],
         'se'     => ['host' => 'whois.iis.se',               'free' => 'state: free'],
         'ch'     => ['host' => 'whois.nic.ch',               'free' => 'We do not have an entry'],
-        'be'     => ['host' => 'whois.dns.be',               'free' => 'Status: FREE'],
+        'be'     => ['host' => 'whois.dns.be',               'free' => "\tAVAILABLE\r", 'parser' => 'be'],
         'at'     => ['host' => 'whois.nic.at',               'free' => 'nothing found'],
         'cz'     => ['rdap' => 'https://rdap.nic.cz/domain/'],
         'dk'     => ['host' => 'whois.dk-hostmaster.dk',     'free' => 'Object does not exist'],
@@ -429,14 +429,75 @@ class WhoisService
         return $result;
     }
 
+    /**
+     * Parser for whois.dns.be responses.
+     *
+     * Top-level lines are tab-separated "Key:\tValue" (Domain, Status,
+     * Registered). Registrant/Registrar/Nameservers/Flags are header-only
+     * lines ("Registrar:") whose content follows on tab-indented lines —
+     * "\tName:\tX" for the registrar, and bare "\thost (ip)" lines (no
+     * colon) for nameservers, which the generic colon-based parser can't
+     * pick up at all.
+     */
+    private function parseBe(string $raw): WhoisResult
+    {
+        $result  = new WhoisResult();
+        $section = '';
+
+        foreach (explode("\n", $raw) as $line) {
+            $line = rtrim($line, "\r");
+
+            if ($line === '' || $line[0] === '%') {
+                continue;
+            }
+
+            $isIndented = $line[0] === "\t" || $line[0] === ' ';
+
+            if (!$isIndented && str_contains($line, ':')) {
+                [$key, $value] = array_map('trim', explode(':', $line, 2));
+                $section = strtolower($key);
+
+                match ($section) {
+                    'domain'     => $result->domainName ??= strtoupper($value),
+                    'status'     => $value !== '' ? $result->statuses[] = $value : null,
+                    'registered' => $result->creationDate ??= $this->parseDate($value),
+                    default      => null,
+                };
+                continue;
+            }
+
+            if (!$isIndented) {
+                continue;
+            }
+
+            $value = ltrim($line, "\t ");
+
+            if ($section === 'registrar' && preg_match('/^Name:\s*(.+)/i', $value, $m)) {
+                $result->registrar ??= trim($m[1]);
+            } elseif ($section === 'registrar' && preg_match('/^Website:\s*(.+)/i', $value, $m)) {
+                $result->referralUrl ??= trim($m[1]);
+            } elseif ($section === 'nameservers' && preg_match('/^([\w.-]+)\s*\(/', $value, $m)) {
+                $host = strtolower($m[1]);
+                if (!in_array($host, $result->nameServers, true)) {
+                    $result->nameServers[] = $host;
+                }
+            } elseif ($section === 'flags' && $value !== '') {
+                $result->statuses[] = $value;
+            }
+        }
+
+        return $result;
+    }
+
     private function parseDate(string $date): ?string
     {
         $date = trim($date);
         if ($date === '') {
             return null;
         }
-        // Strip trailing timezone names / extra tokens (e.g. "2024-01-01T00:00:00Z")
-        $date = preg_replace('/\s+\w+$/', '', $date) ?? $date;
+        // Strip a trailing timezone name (e.g. "... UTC"), but not a bare
+        // trailing year like "Sun Sep 23 2007" — \w+ would eat digits too.
+        $date = preg_replace('/\s+[A-Za-z]+$/', '', $date) ?? $date;
         $ts = strtotime($date);
         return $ts !== false ? date('Y-m-d', $ts) : null;
     }
