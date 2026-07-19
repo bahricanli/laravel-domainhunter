@@ -31,17 +31,26 @@ class DomainParser
             throw new \InvalidArgumentException("Invalid domain format. Example: example.com or example.com.tr");
         }
 
-        // Detect compound TLDs (e.g. com.tr, co.uk, com.au) before single-part fallback
+        // Detect compound TLDs (e.g. com.tr, co.uk, com.au) by checking the
+        // last two labels, regardless of how many subdomain labels precede
+        // them - e.g. "blog.example.co.uk" still resolves to the
+        // "example.co.uk" registrable domain instead of leaving "blog.example"
+        // as a dotted (and therefore always-invalid) label.
         if (count($parts) >= 3) {
             $candidate = $parts[count($parts) - 2] . '.' . $parts[count($parts) - 1];
             if (in_array($candidate, $this->whois->compoundTlds(), true)) {
-                $label = $this->toPunycode(implode('.', array_slice($parts, 0, -2)));
+                $label = $this->toPunycode($parts[count($parts) - 3]);
                 return $this->validateLabel($label, $candidate);
             }
         }
 
+        // Any labels beyond the immediate registrable one are a subdomain
+        // prefix (e.g. "blog"/"a.b.c" in "blog.example.com" /
+        // "a.b.c.example.com") and are intentionally discarded here - only
+        // the registrable domain (the thing WHOIS/RDAP actually indexes) is
+        // returned, however deeply nested the input subdomain is.
         $tld   = array_pop($parts);
-        $label = $this->toPunycode(implode('.', $parts));
+        $label = $this->toPunycode(array_pop($parts));
 
         return $this->validateLabel($label, $tld);
     }
