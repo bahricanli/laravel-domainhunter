@@ -142,7 +142,6 @@ class WhoisService
 
     /**
      * Returns TLDs that contain a dot (e.g. "com.tr", "co.uk").
-     * Used by DomainService for compound-TLD detection during parsing.
      */
     public function compoundTlds(): array
     {
