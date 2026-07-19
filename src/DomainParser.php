@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace BahriCanli\DomainHunter;
 
 /**
- * Framework-agnostic domain-name parsing: compound-TLD detection,
+ * Framework-agnostic domain-name parsing: public-suffix-aware TLD detection,
  * Punycode/IDN conversion and label validation.
  *
  * Extracted from domainhunter's App\Service\DomainService so the same
@@ -14,8 +14,15 @@ namespace BahriCanli\DomainHunter;
  */
 class DomainParser
 {
-    public function __construct(private readonly WhoisService $whois)
-    {
+    private readonly PublicSuffixList $publicSuffixList;
+
+    // $whois is unused here - kept for constructor backward compatibility
+    // with existing call sites in domainhunter/domainhunter-app.
+    public function __construct(
+        private readonly WhoisService $whois,
+        ?PublicSuffixList $publicSuffixList = null,
+    ) {
+        $this->publicSuffixList = $publicSuffixList ?? new PublicSuffixList();
     }
 
     /**
@@ -31,28 +38,20 @@ class DomainParser
             throw new \InvalidArgumentException("Invalid domain format. Example: example.com or example.com.tr");
         }
 
-        // Detect compound TLDs (e.g. com.tr, co.uk, com.au) by checking the
-        // last two labels, regardless of how many subdomain labels precede
-        // them - e.g. "blog.example.co.uk" still resolves to the
-        // "example.co.uk" registrable domain instead of leaving "blog.example"
-        // as a dotted (and therefore always-invalid) label.
-        if (count($parts) >= 3) {
-            $candidate = $parts[count($parts) - 2] . '.' . $parts[count($parts) - 1];
-            if (in_array($candidate, $this->whois->compoundTlds(), true)) {
-                $label = $this->toPunycode($parts[count($parts) - 3]);
-                return $this->validateLabel($label, $candidate);
-            }
-        }
+        // Resolve the registrable label/TLD split against the real Public
+        // Suffix List rather than guessing from a short hand-curated list of
+        // known compound TLDs - that guesswork silently mis-splits any
+        // registry suffix that isn't on the list (e.g. "example.com.br":
+        // "br" alone is a known TLD, so a naive guess treats "com" as the
+        // label and "br" as the TLD instead of recognizing "com.br" as the
+        // suffix). Any labels further left than the resolved suffix are a
+        // subdomain prefix and are intentionally discarded, however deeply
+        // nested (e.g. "blog"/"a.b.c" in "blog.example.com" /
+        // "a.b.c.example.com") - only the registrable domain (the thing
+        // WHOIS/RDAP actually indexes) is returned.
+        ['label' => $label, 'tld' => $tld] = $this->publicSuffixList->split($parts);
 
-        // Any labels beyond the immediate registrable one are a subdomain
-        // prefix (e.g. "blog"/"a.b.c" in "blog.example.com" /
-        // "a.b.c.example.com") and are intentionally discarded here - only
-        // the registrable domain (the thing WHOIS/RDAP actually indexes) is
-        // returned, however deeply nested the input subdomain is.
-        $tld   = array_pop($parts);
-        $label = $this->toPunycode(array_pop($parts));
-
-        return $this->validateLabel($label, $tld);
+        return $this->validateLabel($this->toPunycode($label), $tld);
     }
 
     /**

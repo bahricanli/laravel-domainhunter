@@ -42,7 +42,23 @@ final class DomainParserTest extends TestCase
             'uppercase input is lowercased'       => ['EXAMPLE.COM', 'example', 'com'],
             'leading/trailing whitespace trimmed' => ['  example.com  ', 'example', 'com'],
             'www. prefix is stripped'             => ['www.example.com', 'example', 'com'],
+            // Regression test for the Codex review finding on PR #1: "br"
+            // alone is a known TLD but "com.br" isn't in WhoisService's
+            // hand-curated compound-TLD list, so the old guess silently
+            // treated "com" as the label and "br" as the TLD. The real
+            // Public Suffix List correctly identifies "com.br" as the
+            // suffix and "example" as the label.
+            'unlisted compound TLD (com.br)'      => ['example.com.br', 'example', 'com.br'],
+            'subdomain of unlisted compound TLD'  => ['blog.example.com.br', 'example', 'com.br'],
         ];
+    }
+
+    public function testThrowsWhenInputIsExactlyAPublicSuffix(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('is a public suffix, not a registrable domain');
+
+        $this->parser->parse('co.uk');
     }
 
     public function testThrowsForSingleLabelInput(): void
